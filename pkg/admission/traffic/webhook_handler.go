@@ -4,10 +4,11 @@ import (
 	"bytes"
 	"context"
 
-	trafficctrl "github.com/Kuadrant/multi-cluster-traffic-controller/pkg/controllers/traffic"
+	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
+
+	"github.com/Kuadrant/multi-cluster-traffic-controller/pkg/controllers/ingress"
 	"github.com/Kuadrant/multi-cluster-traffic-controller/pkg/dns"
 	trafficapi "github.com/Kuadrant/multi-cluster-traffic-controller/pkg/traffic"
-	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -27,8 +28,8 @@ type TrafficWebhookHandler[T runtime.Object] struct {
 	// Creates a traffic accessor for the given traffic object
 	NewAccessor func(T) trafficapi.Interface
 
-	HostService trafficctrl.HostService
-	CertService trafficctrl.CertificateService
+	HostService ingress.HostService
+	CertService ingress.CertificateService
 
 	decoder    *admission.Decoder
 	serializer *json.Serializer
@@ -39,8 +40,8 @@ func NewTrafficWebhookHandler[T runtime.Object](
 	newObj func() T,
 	newAccessor func(T) trafficapi.Interface,
 
-	hostService trafficctrl.HostService,
-	certService trafficctrl.CertificateService,
+	hostService ingress.HostService,
+	certService ingress.CertificateService,
 ) (*TrafficWebhookHandler[T], error) {
 	scheme := runtime.NewScheme()
 	if err := addToScheme(scheme); err != nil {

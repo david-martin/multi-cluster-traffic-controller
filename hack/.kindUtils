@@ -24,4 +24,5 @@ nodes:
     hostPort: ${port443}
     protocol: TCP
 EOF
+  kind export kubeconfig --kubeconfig ./hack/kubeconfigs/${cluster}.kubeconfig --name ${cluster}
 }
