@@ -10,3 +10,4 @@ spec:
   - name: test-listener-1
     port: 8443
     protocol: HTTPS
+    hostname: example-gateway-host1.dev.hcpapps.net

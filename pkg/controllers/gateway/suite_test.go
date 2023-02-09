@@ -22,6 +22,7 @@ import (
 	"testing"
 	"time"
 
+	v1 "github.com/Kuadrant/multi-cluster-traffic-controller/pkg/apis/v1"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -29,6 +30,9 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/rest"
+
+	certman "github.com/jetstack/cert-manager/pkg/apis/certmanager/v1"
+	corev1 "k8s.io/api/core/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
@@ -36,6 +40,8 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
+	"github.com/Kuadrant/multi-cluster-traffic-controller/pkg/dns"
+	"github.com/Kuadrant/multi-cluster-traffic-controller/pkg/tls"
 	gatewayv1beta1 "sigs.k8s.io/gateway-api/apis/v1beta1"
 	//+kubebuilder:scaffold:imports
 )
@@ -71,6 +77,7 @@ var _ = BeforeSuite(func() {
 		CRDDirectoryPaths: []string{
 			filepath.Join("../../../", "config", "crd", "bases"),
 			filepath.Join("../../../", "config", "gateway-api", "crd", "standard"),
+			filepath.Join("../../../", "config", "cert-manager", "crd", "v1.7.1"),
 		},
 		ErrorIfCRDPathMissing: true,
 	}
@@ -82,6 +89,9 @@ var _ = BeforeSuite(func() {
 	Expect(cfg).NotTo(BeNil())
 
 	err = gatewayv1beta1.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
+
+	err = certman.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 
 	//+kubebuilder:scaffold:scheme
@@ -101,9 +111,13 @@ var _ = BeforeSuite(func() {
 	}).SetupWithManager(k8sManager)
 	Expect(err).ToNot(HaveOccurred())
 
+	certificates := tls.NewService(k8sManager.GetClient(), "default", "glbc-ca")
+	dns := dns.NewService(k8sManager.GetClient(), dns.NewSafeHostResolver(dns.NewDefaultHostResolver()), "default")
 	err = (&GatewayReconciler{
-		Client: k8sManager.GetClient(),
-		Scheme: k8sManager.GetScheme(),
+		Client:       k8sManager.GetClient(),
+		Scheme:       k8sManager.GetScheme(),
+		Certificates: certificates,
+		Host:         dns,
 	}).SetupWithManager(k8sManager)
 	Expect(err).ToNot(HaveOccurred())
 
@@ -252,6 +266,7 @@ var _ = Describe("GatewayController", func() {
 			Expect(k8sClient.Create(ctx, gatewayclass)).To(BeNil())
 
 			// Stub Gateway for tests
+			hostname := gatewayv1beta1.Hostname("test.example.com")
 			gateway = &gatewayv1beta1.Gateway{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-gw-1",
@@ -267,6 +282,7 @@ var _ = Describe("GatewayController", func() {
 							Name:     "test-listener-1",
 							Port:     8443,
 							Protocol: gatewayv1beta1.HTTPSProtocolType,
+							Hostname: &hostname,
 						},
 					},
 				},
@@ -335,6 +351,74 @@ var _ = Describe("GatewayController", func() {
 				return programmedCondition.Status == metav1.ConditionTrue
 			}, TestTimeoutMedium, TestRetryIntervalMedium).Should(BeTrue())
 			Expect(programmedCondition.Message).To(BeEquivalentTo("Gateways configured in data plane clusters - [test_cluster_one]"))
+		})
+
+		It("should create a DNSRecord for a listener host", func() {
+			Expect(k8sClient.Create(ctx, gateway)).To(BeNil())
+			createdGateway := &gatewayv1beta1.Gateway{}
+			gatewayType := types.NamespacedName{Name: gateway.Name, Namespace: gateway.Namespace}
+
+			// Exists
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, gatewayType, createdGateway)
+				return err == nil
+			}, TestTimeoutMedium, TestRetryIntervalMedium).Should(BeTrue())
+
+			// DNSRecord has been created for listener hostname
+			dnsRecordType := types.NamespacedName{
+				Name:      "test.example.com",
+				Namespace: "default",
+			}
+			createdDnsRecord := &v1.DNSRecord{}
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, dnsRecordType, createdDnsRecord)
+				if err != nil {
+					log.Log.Info("DNSRecord get error", "err", err)
+					return false
+				}
+				return true
+			}, TestTimeoutMedium, TestRetryIntervalMedium).Should(BeTrue())
+		})
+
+		FIt("should create a Certificate & setup tls for a listener host", func() {
+			Expect(k8sClient.Create(ctx, gateway)).To(BeNil())
+			createdGateway := &gatewayv1beta1.Gateway{}
+			gatewayType := types.NamespacedName{Name: gateway.Name, Namespace: gateway.Namespace}
+
+			// Exists
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, gatewayType, createdGateway)
+				return err == nil
+			}, TestTimeoutMedium, TestRetryIntervalMedium).Should(BeTrue())
+
+			// Certificate secret is created
+			certificateType := types.NamespacedName{
+				Name:      "test.example.com",
+				Namespace: "default",
+			}
+			createdCertificate := &corev1.Secret{}
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, certificateType, createdCertificate)
+				if err != nil {
+					log.Log.Info("Certificate get error", "err", err)
+					return false
+				}
+				return true
+			}, TestTimeoutMedium, TestRetryIntervalMedium).Should(BeTrue())
+			Expect(createdCertificate.Data["ca.crt"]).ToNot(BeNil())
+
+			// TLS config added to listener
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, gatewayType, createdGateway)
+				if err != nil {
+					log.Log.Error(err, "No errors expected")
+					Fail("No errors expected")
+				}
+				return createdGateway.Spec.Listeners[0].TLS != nil
+			}, TestTimeoutMedium, TestRetryIntervalMedium).Should(BeTrue())
+			listener := createdGateway.Spec.Listeners[0]
+			certificateRef := listener.TLS.CertificateRefs[0]
+			Expect(certificateRef.Name).To(BeEquivalentTo("test.example.com"))
 		})
 
 		It("should NOT match any clusters", func() {

@@ -99,11 +99,13 @@ func (s *Service) AddEndPoints(ctx context.Context, traffic traffic.Interface) e
 	if err != nil {
 		return err
 	}
+	log.Log.Info("ips", "ips", ips)
 
 	records, err := s.GetDNSRecords(ctx, traffic)
 	if err != nil {
 		return err
 	}
+	log.Log.Info("records", "records", records)
 	// for each managed host update dns. A managed host will have a DNSRecord in the control plane
 	for _, r := range records {
 		host := r.Name
@@ -203,8 +205,8 @@ func (s *Service) EnsureManagedHost(ctx context.Context, t traffic.Interface) ([
 
 	log.Log.Info("no managed host found generating one")
 	hostKey := shortuuid.NewWithNamespace(t.GetNamespace() + t.GetName())
-	zones := getManagedZones()
-	var chosenZone zone
+	zones := s.GetManagedZones()
+	var chosenZone Zone
 	var managedHost string
 	for _, z := range zones {
 		if z.Default {
@@ -286,15 +288,15 @@ func (s *Service) PatchTargets(ctx context.Context, targets, hosts []string, clu
 }
 
 // this is temporary and will be replaced in the future by CRD resources
-type zone struct {
+type Zone struct {
 	v1.DNSZone
 	RootDomain string
 	Default    bool
 }
 
 // this is temporary and will be replaced in the future by CRD resources
-func getManagedZones() []zone {
-	return []zone{{
+func (s *Service) GetManagedZones() []Zone {
+	return []Zone{{
 		DNSZone:    v1.DNSZone{ID: os.Getenv("AWS_DNS_PUBLIC_ZONE_ID")},
 		RootDomain: os.Getenv("ZONE_ROOT_DOMAIN"),
 		Default:    true,

@@ -12,6 +12,10 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
+const (
+	TrafficFinalizer = "kuadrant.io/traffic-management"
+)
+
 type CreateOrUpdateTraffic func(ctx context.Context, i Interface) error
 type DeleteTraffic func(ctx context.Context, i Interface) error
 

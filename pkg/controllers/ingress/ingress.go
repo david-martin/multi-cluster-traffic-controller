@@ -30,14 +30,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	mctcv1 "github.com/Kuadrant/multi-cluster-traffic-controller/pkg/apis/v1"
+	v1 "github.com/Kuadrant/multi-cluster-traffic-controller/pkg/apis/v1"
+	"github.com/Kuadrant/multi-cluster-traffic-controller/pkg/dns"
 	"github.com/Kuadrant/multi-cluster-traffic-controller/pkg/traffic"
 )
 
-const (
-	trafficFinalizer = "kuadrant.io/traffic-management"
-)
-
 type HostService interface {
+	RegisterHost(ctx context.Context, h string, id string, zone v1.DNSZone) (*mctcv1.DNSRecord, error)
+	GetManagedZones() []dns.Zone
 	EnsureManagedHost(ctx context.Context, t traffic.Interface) ([]string, []*mctcv1.DNSRecord, error)
 	AddEndPoints(ctx context.Context, t traffic.Interface) error
 	RemoveEndpoints(ctx context.Context, t traffic.Interface) error
@@ -101,7 +101,7 @@ func (r *Ingress) Handle(ctx context.Context, trafficAccessor traffic.Interface)
 		if err != nil {
 			return ctrl.Result{Requeue: true, RequeueAfter: 10 * time.Second}, err
 		}
-		controllerutil.RemoveFinalizer(trafficAccessor, trafficFinalizer)
+		controllerutil.RemoveFinalizer(trafficAccessor, traffic.TrafficFinalizer)
 		return ctrl.Result{}, nil
 	}
 
@@ -151,13 +151,13 @@ func (r *Ingress) Handle(ctx context.Context, trafficAccessor traffic.Interface)
 		if err != nil {
 			return ctrl.Result{Requeue: true, RequeueAfter: 10 * time.Second}, err
 		}
-		controllerutil.AddFinalizer(trafficAccessor, trafficFinalizer)
+		controllerutil.AddFinalizer(trafficAccessor, traffic.TrafficFinalizer)
 	} else { //removing DNS patches
 		err = r.DNS.PatchTargets(ctx, targets, trafficAccessor.GetHosts(), r.ClusterID, true)
 		if err != nil {
 			return ctrl.Result{Requeue: true, RequeueAfter: 10 * time.Second}, err
 		}
-		controllerutil.RemoveFinalizer(trafficAccessor, trafficFinalizer)
+		controllerutil.RemoveFinalizer(trafficAccessor, traffic.TrafficFinalizer)
 	}
 	return ctrl.Result{}, nil
 }

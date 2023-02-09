@@ -125,8 +125,11 @@ func main() {
 	}
 
 	if err = (&gateway.GatewayReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:       mgr.GetClient(),
+		Scheme:       mgr.GetScheme(),
+		Certificates: certService,
+		DNS:          dnsService,
+		Host:         dnsService, // implements the required interface
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "Gateway")
 		os.Exit(1)

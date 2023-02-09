@@ -104,6 +104,7 @@ func (r *GatewayClassReconciler) Reconcile(ctx context.Context, req ctrl.Request
 				},
 			},
 		}
+		// TODO: Edge case. Trigger reconcile of any Gateways that may have existed while the class didn't
 	}
 
 	log.Info("Updating GatewayClass", "status", gatewayclass.Status)
