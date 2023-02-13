@@ -56,18 +56,10 @@ type GatewayReconciler struct {
 //+kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways/finalizers,verbs=update
 
-// Reconcile is part of the main kubernetes reconciliation loop which aims to
-// move the current state of the cluster closer to the desired state.
-// TODO(user): Modify the Reconcile function to compare the state specified by
-// the Gateway object against the actual cluster state, and then
-// perform operations to make the cluster state reflect the state specified by
-// the user.
-//
-// For more details, check Reconcile and its Result here:
-// - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.13.1/pkg/reconcile
 func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	log := log.FromContext(ctx)
 
+	// TODO: Revise info logs for removal
 	log.Info("Gateway.Reconcile", "req", req)
 	previous := &gatewayv1beta1.Gateway{}
 	err := r.Client.Get(ctx, client.ObjectKey{Namespace: req.Namespace, Name: req.Name}, previous)
@@ -114,8 +106,8 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	clusters := selectClusters(ctx, *gateway)
 	log.Info("selectClusters", "clusters", clusters)
+	// Don't do anything else until at least 1 cluster matches.
 	if len(clusters) == 0 {
-		// TODO: Should a certificate be created even if no clusters are selected?
 		statusConditions = append(statusConditions, metav1.Condition{
 			LastTransitionTime: metav1.Now(),
 			Message:            "No clusters match selection",
@@ -130,7 +122,6 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		//       rather than ending the reconcile early without updating Gateway status
 		hosts := trafficAccessor.GetHosts()
 
-		// TODO: Revise info logs for removal
 		log.Info("hosts", "hosts", hosts)
 		for _, host := range hosts {
 			// create certificate resource for assigned host
@@ -139,14 +130,12 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 				return ctrl.Result{}, err
 			}
 
-			// when certificate ready copy secret (need to add event handler for certs)
-			// only once certificate is ready update DNS based status of ingress
+			// Check if certificate secret is ready
 			secret, err := r.Certificates.GetCertificateSecret(ctx, host)
 			if err != nil && !k8serrors.IsNotFound(err) {
 				log.Error(err, "Error getting certificate secret")
 				return ctrl.Result{}, err
 			}
-			// if err is not exists return and wait
 			if err != nil {
 				log.Info("tls secret does not exist yet for host " + host + " requeue")
 				return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 10}, nil
@@ -171,9 +160,7 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 
 		// TODO: When do we know when the certificate secret has synced?
-		// TODO: Validate hosts against managed zones before creating dns record & certificate.
-		//       Custom hosts with certificates are OK and we'll skip these
-		// TODO: Some listeners may not have a HTTPRoute yet in the data plan.
+		// TODO: Some listeners may not have a HTTPRoute yet in the data plane.
 		//       Should those targets be omitted from the DNSRecord?
 		// TODO: Move this logic into dns service
 
@@ -181,6 +168,8 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		hostKey := shortuuid.NewWithNamespace(trafficAccessor.GetNamespace() + trafficAccessor.GetName())
 		for _, host := range hosts {
 			var chosenZone dns.Zone
+			// TODO: Validate hosts against managed zones before creating dns record & certificate.
+			//       Custom hosts with certificates are OK and we'll skip these
 			for _, z := range zones {
 				if z.Default {
 					chosenZone = z
@@ -218,7 +207,7 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 		statusConditions = append(statusConditions, metav1.Condition{
 			LastTransitionTime: metav1.Now(),
-			Message:            fmt.Sprintf("Gateways configured in data plane clusters - [%v]", strings.Join(clusters, ",")),
+			Message:            fmt.Sprintf("Gateway configured in data plane cluster(s) - [%v]", strings.Join(clusters, ",")),
 			Reason:             string(gatewayv1beta1.GatewayConditionProgrammed),
 			Status:             metav1.ConditionTrue,
 			Type:               string(gatewayv1beta1.GatewayConditionProgrammed),

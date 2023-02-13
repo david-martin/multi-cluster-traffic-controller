@@ -350,7 +350,7 @@ var _ = Describe("GatewayController", func() {
 				Expect(programmedCondition).ToNot(BeNil())
 				return programmedCondition.Status == metav1.ConditionTrue
 			}, TestTimeoutMedium, TestRetryIntervalMedium).Should(BeTrue())
-			Expect(programmedCondition.Message).To(BeEquivalentTo("Gateways configured in data plane clusters - [test_cluster_one]"))
+			Expect(programmedCondition.Message).To(BeEquivalentTo("Gateway configured in data plane cluster(s) - [test_cluster_one]"))
 		})
 
 		It("should create a DNSRecord for a listener host", func() {

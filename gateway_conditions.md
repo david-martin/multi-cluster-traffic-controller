@@ -103,7 +103,7 @@ The condition will transition to the below when the Gateway configuration has be
       status: "True"
       type: Programmed
       reason: Programmed
-      message: "Gateways configured in data plane clusters - [<comma separated list of cluster names>]"
+      message: "Gateway configured in data plane cluster(s) - [<comma separated list of cluster names>]"
       observedGeneration: <corresponding metadata.generation>
 ```
 
