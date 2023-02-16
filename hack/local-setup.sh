@@ -204,10 +204,10 @@ if [[ -n "${MCTC_WORKLOAD_CLUSTERS_COUNT}" ]]; then
   for ((i = 1; i <= ${MCTC_WORKLOAD_CLUSTERS_COUNT}; i++)); do
     kindCreateCluster ${KIND_CLUSTER_WORKLOAD}-${i} $((${port80} + ${i})) $((${port443} + ${i}))
     installGatewayAPI ${KIND_CLUSTER_WORKLOAD}-${i}
-    deployIngressController ${KIND_CLUSTER_WORKLOAD}-${i}
+    # deployIngressController ${KIND_CLUSTER_WORKLOAD}-${i}
     deployIstio ${KIND_CLUSTER_WORKLOAD}-${i}
     deployKuadrant ${KIND_CLUSTER_WORKLOAD}-${i}
-    deployWebhookConfigs ${KIND_CLUSTER_WORKLOAD}-${i}
+#    deployWebhookConfigs ${KIND_CLUSTER_WORKLOAD}-${i}
     deployDashboard ${KIND_CLUSTER_WORKLOAD}-${i} ${i}
     argocdAddCluster ${KIND_CLUSTER_CONTROL_PLANE} ${KIND_CLUSTER_WORKLOAD}-${i}
   done 
