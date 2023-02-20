@@ -3,7 +3,6 @@ package traffic
 import (
 	"fmt"
 
-	admissionv1 "k8s.io/api/admissionregistration/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/cache"
@@ -134,11 +133,6 @@ func (a *Gateway) GetDNSTargets() ([]kuadrantv1.Target, error) {
 	dnsTargets = append(dnsTargets, dnsTarget)
 
 	return dnsTargets, nil
-}
-
-func (a *Gateway) GetWebhookConfigurations(host string, caBundle []byte) ([]*admissionv1.ValidatingWebhookConfiguration, []*admissionv1.MutatingWebhookConfiguration) {
-	// Not implemented for Gateways
-	return []*admissionv1.ValidatingWebhookConfiguration{}, []*admissionv1.MutatingWebhookConfiguration{}
 }
 
 func (a *Gateway) ExposesOwnController() bool {
