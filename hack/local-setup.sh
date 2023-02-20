@@ -131,8 +131,12 @@ deployIstio() {
 
   kubectl config use-context kind-${clusterName}
 
-  ${KUSTOMIZE_BIN} build ${ISTIO_KUSTOMIZATION_DIR}/base --enable-helm --helm-command ${HELM_BIN} | kubectl apply -f -
-  ${KUSTOMIZE_BIN} build ${ISTIO_KUSTOMIZATION_DIR}/istiod --enable-helm --helm-command ${HELM_BIN} | kubectl apply -f -
+  # ${KUSTOMIZE_BIN} build ${ISTIO_KUSTOMIZATION_DIR}/base --enable-helm --helm-command ${HELM_BIN} | kubectl apply -f -
+  # ${KUSTOMIZE_BIN} build ${ISTIO_KUSTOMIZATION_DIR}/istiod --enable-helm --helm-command ${HELM_BIN} | kubectl apply -f -
+  ${KUSTOMIZE_BIN} build ${ISTIO_KUSTOMIZATION_DIR}/istio-operator --enable-helm --helm-command ${HELM_BIN} | kubectl apply -f -
+
+  echo "Creating IstioOperator CR"
+  kubectl -n istio-system apply -f ${ISTIO_KUSTOMIZATION_DIR}/istio-operator/istio-operator.yaml
 
   echo "Waiting for Istiod deployment to be ready..."
   kubectl -n istio-system wait --timeout=300s --for=condition=Available deployments --all
@@ -205,29 +209,29 @@ docker network create -d bridge --subnet 172.32.0.0/16 mctc --gateway 172.32.0.1
   -o "com.docker.network.bridge.enable_ip_masquerade"="true" \
   -o "com.docker.network.driver.mtu"="1500"
 
-#1. Create Kind control plane cluster
-kindCreateCluster ${KIND_CLUSTER_CONTROL_PLANE} ${port80} ${port443}
+# #1. Create Kind control plane cluster
+# kindCreateCluster ${KIND_CLUSTER_CONTROL_PLANE} ${port80} ${port443}
 
-#2. Install the Gateway API CRDs in the control cluster
-installGatewayAPI ${KIND_CLUSTER_CONTROL_PLANE}
+# #2. Install the Gateway API CRDs in the control cluster
+# installGatewayAPI ${KIND_CLUSTER_CONTROL_PLANE}
 
-#3. Deploy ingress controller
-deployIngressController ${KIND_CLUSTER_CONTROL_PLANE}
+# #3. Deploy ingress controller
+# deployIngressController ${KIND_CLUSTER_CONTROL_PLANE}
 
-#4. Deploy cert manager
-deployCertManager ${KIND_CLUSTER_CONTROL_PLANE}
+# #4. Deploy cert manager
+# deployCertManager ${KIND_CLUSTER_CONTROL_PLANE}
 
-#5. Deploy external dns
-deployExternalDNS ${KIND_CLUSTER_CONTROL_PLANE}
+# #5. Deploy external dns
+# deployExternalDNS ${KIND_CLUSTER_CONTROL_PLANE}
 
-#6. Deploy argo cd
-deployArgoCD ${KIND_CLUSTER_CONTROL_PLANE}
+# #6. Deploy argo cd
+# deployArgoCD ${KIND_CLUSTER_CONTROL_PLANE}
 
-#7. Deploy Dashboard
-deployDashboard $KIND_CLUSTER_CONTROL_PLANE 0
+# #7. Deploy Dashboard
+# deployDashboard $KIND_CLUSTER_CONTROL_PLANE 0
 
-#8. Add the control plane cluster
-argocdAddCluster ${KIND_CLUSTER_CONTROL_PLANE} ${KIND_CLUSTER_CONTROL_PLANE}
+# #8. Add the control plane cluster
+# argocdAddCluster ${KIND_CLUSTER_CONTROL_PLANE} ${KIND_CLUSTER_CONTROL_PLANE}
 
 #9. Add workload clusters if MCTC_WORKLOAD_CLUSTERS_COUNT environment variable is set
 if [[ -n "${MCTC_WORKLOAD_CLUSTERS_COUNT}" ]]; then
@@ -240,7 +244,7 @@ if [[ -n "${MCTC_WORKLOAD_CLUSTERS_COUNT}" ]]; then
     deployKuadrant ${KIND_CLUSTER_WORKLOAD}-${i}
     deployWebhookConfigs ${KIND_CLUSTER_WORKLOAD}-${i}
     deployDashboard ${KIND_CLUSTER_WORKLOAD}-${i} ${i}
-    argocdAddCluster ${KIND_CLUSTER_CONTROL_PLANE} ${KIND_CLUSTER_WORKLOAD}-${i}
+    # argocdAddCluster ${KIND_CLUSTER_CONTROL_PLANE} ${KIND_CLUSTER_WORKLOAD}-${i}
   done 
 fi
 
