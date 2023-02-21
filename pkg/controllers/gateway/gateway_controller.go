@@ -115,7 +115,7 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if len(clusters) > 0 {
 		programmedCondition = metav1.Condition{
 			LastTransitionTime: metav1.Now(),
-			Message:            fmt.Sprintf("Waiting for controller"),
+			Message:            "Waiting for controller",
 			Reason:             string(gatewayv1beta1.GatewayReasonPending),
 			Status:             metav1.ConditionUnknown,
 			Type:               string(gatewayv1beta1.GatewayConditionProgrammed),
