@@ -85,6 +85,9 @@ var _ = BeforeSuite(func() {
 	Expect(err).NotTo(HaveOccurred())
 	Expect(cfg).NotTo(BeNil())
 
+	err = v1.AddToScheme(scheme.Scheme)
+	Expect(err).NotTo(HaveOccurred())
+
 	err = gatewayv1beta1.AddToScheme(scheme.Scheme)
 	Expect(err).NotTo(HaveOccurred())
 
@@ -333,8 +336,38 @@ var _ = Describe("GatewayController", func() {
 			}, TestTimeoutMedium, TestRetryIntervalMedium).Should(BeTrue())
 			Expect(acceptedCondition.Message).To(BeEquivalentTo("Handled by kuadrant.io/mctc-gw-controller"))
 
-			// Programmed is True
+			// Programmed is Unknown for now
 			var programmedCondition *metav1.Condition
+			Eventually(func() bool {
+				err := k8sClient.Get(ctx, gatewayType, createdGateway)
+				if err != nil {
+					// explicitly fail as we should be passed the point of any errors
+					log.Log.Error(err, "No errors expected")
+					Fail("No errors expected")
+				}
+				programmedCondition = findConditionByType(createdGateway.Status.Conditions, gatewayv1beta1.GatewayConditionProgrammed)
+				log.Log.Info("programmedCondition", "programmedCondition", programmedCondition)
+				Expect(programmedCondition).ToNot(BeNil())
+				return programmedCondition.Status == metav1.ConditionUnknown
+			}, TestTimeoutMedium, TestRetryIntervalMedium).Should(BeTrue())
+
+			// create a certificate secret, mimicking what cert-manager would do at this point
+			tlsSecret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test.example.com",
+					Namespace: "default",
+				},
+				StringData: map[string]string{
+					"tls.key": "some_value",
+				},
+			}
+			err := k8sClient.Create(ctx, tlsSecret)
+			if err != nil {
+				// explicitly fail as we should be passed the point of any errors
+				Fail("Error creating mock certificate secret")
+			}
+
+			// Programmed is True
 			Eventually(func() bool {
 				err := k8sClient.Get(ctx, gatewayType, createdGateway)
 				if err != nil {

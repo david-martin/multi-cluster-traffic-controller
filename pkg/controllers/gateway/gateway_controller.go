@@ -256,6 +256,9 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 func applyClusterSyncerAnnotationsToObject(obj metav1.Object, clusters []string) {
 	annotations := obj.GetAnnotations()
+	if len(annotations) == 0 {
+		annotations = map[string]string{}
+	}
 	for _, cluster := range clusters {
 		annotations[fmt.Sprintf("%s/%s", ClusterSyncerAnnotation, cluster)] = "True"
 	}
