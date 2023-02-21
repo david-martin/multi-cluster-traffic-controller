@@ -123,16 +123,37 @@ func (a *Gateway) String() string {
 func (a *Gateway) GetDNSTargets() ([]kuadrantv1.Target, error) {
 	dnsTargets := []kuadrantv1.Target{}
 
-	// TODO: Fetch Gateway IP Adresses from aggregated Gateway status
-	// HARDCODED
-	dnsTarget := kuadrantv1.Target{
-		TargetType: kuadrantv1.TargetTypeIP,
-		Value:      "172.18.0.1",
+	gatewayStatus := getGatewayStatuses(a)
+	for _, gatewayStatus := range gatewayStatus {
+		if len(gatewayStatus.Addresses) == 0 {
+			continue
+		}
+		// TODO: Allow for more than 1 address
+		ipAddress := gatewayStatus.Addresses[0].Value
+		dnsTarget := kuadrantv1.Target{
+			TargetType: kuadrantv1.TargetTypeIP,
+			Value:      ipAddress,
+		}
+		dnsTargets = append(dnsTargets, dnsTarget)
 	}
 
-	dnsTargets = append(dnsTargets, dnsTarget)
-
 	return dnsTargets, nil
+}
+
+func getGatewayStatuses(a *Gateway) []gatewayv1beta1.GatewayStatus {
+	// TODO: Fetch Gateway IP Adresses from aggregated Gateway status
+	// HARDCODED
+	addrType := gatewayv1beta1.HostnameAddressType
+	return []gatewayv1beta1.GatewayStatus{
+		{
+			Addresses: []gatewayv1beta1.GatewayAddress{
+				{
+					Type:  &addrType,
+					Value: "172.32.200.0",
+				},
+			},
+		},
+	}
 }
 
 func (a *Gateway) ExposesOwnController() bool {
