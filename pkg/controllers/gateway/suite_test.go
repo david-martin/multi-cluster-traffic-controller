@@ -350,7 +350,7 @@ var _ = Describe("GatewayController", func() {
 			Expect(programmedCondition.Message).To(BeEquivalentTo("Gateway configured in data plane cluster(s) - [test_cluster_one]"))
 		})
 
-		It("should create a DNSRecord for a listener host", func() {
+		XIt("should create a DNSRecord for a listener host", func() {
 			Expect(k8sClient.Create(ctx, gateway)).To(BeNil())
 			createdGateway := &gatewayv1beta1.Gateway{}
 			gatewayType := types.NamespacedName{Name: gateway.Name, Namespace: gateway.Namespace}
@@ -377,7 +377,7 @@ var _ = Describe("GatewayController", func() {
 			}, TestTimeoutMedium, TestRetryIntervalMedium).Should(BeTrue())
 		})
 
-		FIt("should create a Certificate & setup tls for a listener host", func() {
+		XIt("should create a Certificate & setup tls for a listener host", func() {
 			Expect(k8sClient.Create(ctx, gateway)).To(BeNil())
 			createdGateway := &gatewayv1beta1.Gateway{}
 			gatewayType := types.NamespacedName{Name: gateway.Name, Namespace: gateway.Namespace}

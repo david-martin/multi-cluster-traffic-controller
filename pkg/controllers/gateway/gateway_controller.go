@@ -100,28 +100,49 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	gateway := previous.DeepCopy()
-	statusConditions := []metav1.Condition{}
-	statusConditions = append(statusConditions, metav1.Condition{
+	acceptedCondition := metav1.Condition{
 		LastTransitionTime: metav1.Now(),
 		Message:            fmt.Sprintf("Handled by %s", ControllerName),
 		Reason:             string(gatewayv1beta1.GatewayConditionAccepted),
 		Status:             metav1.ConditionTrue,
 		Type:               string(gatewayv1beta1.GatewayConditionAccepted),
 		ObservedGeneration: previous.Generation,
-	})
+	}
 
 	clusters := selectClusters(*gateway)
-	// Don't do anything else until at least 1 cluster matches.
-	if len(clusters) == 0 {
-		statusConditions = append(statusConditions, metav1.Condition{
+	var programmedCondition metav1.Condition
+	// Update initial Programmed status
+	if len(clusters) > 0 {
+		programmedCondition = metav1.Condition{
+			LastTransitionTime: metav1.Now(),
+			Message:            fmt.Sprintf("Waiting for controller"),
+			Reason:             string(gatewayv1beta1.GatewayReasonPending),
+			Status:             metav1.ConditionUnknown,
+			Type:               string(gatewayv1beta1.GatewayConditionProgrammed),
+			ObservedGeneration: previous.Generation,
+		}
+	} else {
+		programmedCondition = metav1.Condition{
 			LastTransitionTime: metav1.Now(),
 			Message:            "No clusters match selection",
 			Reason:             string(gatewayv1beta1.GatewayReasonPending),
 			Status:             metav1.ConditionFalse,
 			Type:               string(gatewayv1beta1.GatewayConditionProgrammed),
 			ObservedGeneration: previous.Generation,
-		})
-	} else {
+		}
+	}
+	// Save status conditions at this point
+	gateway.Status.Conditions = []metav1.Condition{acceptedCondition, programmedCondition}
+	if !reflect.DeepEqual(gateway.Status, previous.Status) {
+		log.Info("Updating Gateway status", "gatewayStatus", gateway.Status)
+		err = r.Status().Update(ctx, gateway)
+		if err != nil {
+			return ctrl.Result{}, err
+		}
+	}
+
+	// Don't do anything else until at least 1 cluster matches.
+	if len(clusters) > 0 {
 		trafficAccessor := traffic.NewGateway(gateway)
 		// TODO: Review potential states of reconcile and if the Gateway status should reflect different stages
 		//       rather than ending the reconcile early without updating Gateway status
@@ -210,22 +231,23 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			}
 		}
 
-		statusConditions = append(statusConditions, metav1.Condition{
+		// Update programmed condition
+		programmedCondition = metav1.Condition{
 			LastTransitionTime: metav1.Now(),
 			Message:            fmt.Sprintf("Gateway configured in data plane cluster(s) - [%v]", strings.Join(clusters, ",")),
 			Reason:             string(gatewayv1beta1.GatewayConditionProgrammed),
 			Status:             metav1.ConditionTrue,
 			Type:               string(gatewayv1beta1.GatewayConditionProgrammed),
 			ObservedGeneration: previous.Generation,
-		})
-	}
-
-	gateway.Status.Conditions = statusConditions
-	if !reflect.DeepEqual(gateway.Status, previous.Status) {
-		log.Info("Updating Gateway status", "gatewayStatus", gateway.Status)
-		err = r.Status().Update(ctx, gateway)
-		if err != nil {
-			return ctrl.Result{}, err
+		}
+		// Update status conditions again
+		gateway.Status.Conditions = []metav1.Condition{acceptedCondition, programmedCondition}
+		if !reflect.DeepEqual(gateway.Status, previous.Status) {
+			log.Info("Updating Gateway status", "gatewayStatus", gateway.Status)
+			err = r.Status().Update(ctx, gateway)
+			if err != nil {
+				return ctrl.Result{}, err
+			}
 		}
 	}
 
