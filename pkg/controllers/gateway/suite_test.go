@@ -381,61 +381,6 @@ var _ = Describe("GatewayController", func() {
 				return programmedCondition.Status == metav1.ConditionTrue
 			}, TestTimeoutMedium, TestRetryIntervalMedium).Should(BeTrue())
 			Expect(programmedCondition.Message).To(BeEquivalentTo("Gateway configured in data plane cluster(s) - [test_cluster_one]"))
-		})
-
-		XIt("should create a DNSRecord for a listener host", func() {
-			Expect(k8sClient.Create(ctx, gateway)).To(BeNil())
-			createdGateway := &gatewayv1beta1.Gateway{}
-			gatewayType := types.NamespacedName{Name: gateway.Name, Namespace: gateway.Namespace}
-
-			// Exists
-			Eventually(func() bool {
-				err := k8sClient.Get(ctx, gatewayType, createdGateway)
-				return err == nil
-			}, TestTimeoutMedium, TestRetryIntervalMedium).Should(BeTrue())
-
-			// DNSRecord has been created for listener hostname
-			dnsRecordType := types.NamespacedName{
-				Name:      "test.example.com",
-				Namespace: "default",
-			}
-			createdDnsRecord := &v1.DNSRecord{}
-			Eventually(func() bool {
-				err := k8sClient.Get(ctx, dnsRecordType, createdDnsRecord)
-				if err != nil {
-					log.Log.Info("DNSRecord get error", "err", err)
-					return false
-				}
-				return true
-			}, TestTimeoutMedium, TestRetryIntervalMedium).Should(BeTrue())
-		})
-
-		XIt("should create a Certificate & setup tls for a listener host", func() {
-			Expect(k8sClient.Create(ctx, gateway)).To(BeNil())
-			createdGateway := &gatewayv1beta1.Gateway{}
-			gatewayType := types.NamespacedName{Name: gateway.Name, Namespace: gateway.Namespace}
-
-			// Exists
-			Eventually(func() bool {
-				err := k8sClient.Get(ctx, gatewayType, createdGateway)
-				return err == nil
-			}, TestTimeoutMedium, TestRetryIntervalMedium).Should(BeTrue())
-
-			// Certificate secret is created
-			certificateType := types.NamespacedName{
-				Name:      "test.example.com",
-				Namespace: "default",
-			}
-			createdCertificate := &corev1.Secret{}
-			Eventually(func() bool {
-				err := k8sClient.Get(ctx, certificateType, createdCertificate)
-				if err != nil {
-					log.Log.Info("Certificate get error", "err", err)
-					return false
-				}
-				return true
-			}, TestTimeoutMedium, TestRetryIntervalMedium).Should(BeTrue())
-			Expect(createdCertificate.Data["ca.crt"]).ToNot(BeNil())
 
 			// TLS config added to listener
 			Eventually(func() bool {
