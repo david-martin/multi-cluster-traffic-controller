@@ -23,14 +23,15 @@ import (
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/Kuadrant/multi-cluster-traffic-controller/pkg/_internal/slice"
-	"github.com/Kuadrant/multi-cluster-traffic-controller/pkg/controllers/ingress"
+	v1 "github.com/Kuadrant/multi-cluster-traffic-controller/pkg/apis/v1"
 	"github.com/Kuadrant/multi-cluster-traffic-controller/pkg/dns"
 	"github.com/Kuadrant/multi-cluster-traffic-controller/pkg/traffic"
 	"github.com/lithammer/shortuuid/v4"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -44,6 +45,18 @@ const (
 	GatewayClusterLabelSelectorAnnotation = "kuadrant.io/gateway-cluster-label-selector"
 )
 
+type HostService interface {
+	RegisterHost(ctx context.Context, h string, id string, zone v1.DNSZone) (*v1.DNSRecord, error)
+	GetManagedZones() []dns.Zone
+	AddEndPoints(ctx context.Context, t traffic.Interface) error
+	RemoveEndpoints(ctx context.Context, t traffic.Interface) error
+}
+
+type CertificateService interface {
+	EnsureCertificate(ctx context.Context, host string, owner metav1.Object) error
+	GetCertificateSecret(ctx context.Context, host string) (*corev1.Secret, error)
+}
+
 type GatewayHelper interface {
 	GetGatewayStatuses() []gatewayv1beta1.GatewayStatus
 	GetListenerNameByHost(host string) string
@@ -54,8 +67,8 @@ type GatewayHelper interface {
 type GatewayReconciler struct {
 	client.Client
 	Scheme       *runtime.Scheme
-	Certificates ingress.CertificateService
-	Host         ingress.HostService
+	Certificates CertificateService
+	Host         HostService
 }
 
 //+kubebuilder:rbac:groups=gateway.networking.k8s.io,resources=gateways,verbs=get;list;watch;create;update;patch;delete
@@ -85,6 +98,8 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	if previous.GetDeletionTimestamp() != nil && !previous.GetDeletionTimestamp().IsZero() {
+		// TODO: Do we need to remove dns records and/or endpoints?
+		//       Will ownerRefs be sufficient
 		log.Info("Gateway is deleting", "gateway", previous)
 		return ctrl.Result{}, nil
 	}
@@ -150,8 +165,6 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// Don't do anything else until at least 1 cluster matches.
 	if len(clusters) > 0 {
 		trafficAccessor := traffic.NewGateway(gateway)
-		// TODO: Review potential states of reconcile and if the Gateway status should reflect different stages
-		//       rather than ending the reconcile early without updating Gateway status
 		hosts := trafficAccessor.GetHosts()
 
 		log.Info("hosts", "hosts", hosts)
@@ -187,15 +200,11 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 				}
 				trafficAccessor.AddTLS(host, secret)
 			}
-
+			// Secrets don't have a status, so we can't say for sure if it's synced OK. Optimism here.
 			log.Info("certificate secret in place for host. Adding dns endpoints", "host", host)
 		}
 
-		// TODO: When do we know when the certificate secret has synced?
-		// TODO: Some listeners may not have a HTTPRoute yet in the data plane.
-		//       Should those targets be omitted from the DNSRecord?
-		// TODO: Move this logic into dns service
-
+		// TODO: Move this logic into dns service?
 		zones := r.Host.GetManagedZones()
 		hostKey := shortuuid.NewWithNamespace(trafficAccessor.GetNamespace() + trafficAccessor.GetName())
 		hasAnyAttachedRoutes := false
