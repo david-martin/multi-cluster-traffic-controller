@@ -117,7 +117,7 @@ func (r *GatewayClassReconciler) Reconcile(ctx context.Context, req ctrl.Request
 }
 
 func gatewayClassIsAccepted(gatewayClass *gatewayv1beta1.GatewayClass) bool {
-	acceptedCondition := findConditionByType(gatewayClass.Status.Conditions, gatewayv1beta1.GatewayConditionAccepted)
+	acceptedCondition := getConditionByType(gatewayClass.Status.Conditions, gatewayv1beta1.GatewayConditionAccepted)
 	return (acceptedCondition != nil && acceptedCondition.Status == metav1.ConditionTrue)
 }
 

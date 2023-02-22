@@ -123,8 +123,7 @@ func (a *Gateway) String() string {
 func (a *Gateway) GetDNSTargets() ([]kuadrantv1.Target, error) {
 	dnsTargets := []kuadrantv1.Target{}
 
-	gatewayStatus := getGatewayStatuses(a)
-	for _, gatewayStatus := range gatewayStatus {
+	for _, gatewayStatus := range a.GetGatewayStatuses() {
 		if len(gatewayStatus.Addresses) == 0 {
 			continue
 		}
@@ -140,8 +139,8 @@ func (a *Gateway) GetDNSTargets() ([]kuadrantv1.Target, error) {
 	return dnsTargets, nil
 }
 
-func getGatewayStatuses(a *Gateway) []gatewayv1beta1.GatewayStatus {
-	// TODO: Fetch Gateway IP Adresses from aggregated Gateway status
+func (a *Gateway) GetGatewayStatuses() []gatewayv1beta1.GatewayStatus {
+	// TODO: Aggregated Gateway status from syncer
 	// HARDCODED
 	addrType := gatewayv1beta1.HostnameAddressType
 	return []gatewayv1beta1.GatewayStatus{
@@ -152,8 +151,38 @@ func getGatewayStatuses(a *Gateway) []gatewayv1beta1.GatewayStatus {
 					Value: "172.32.200.0",
 				},
 			},
+			Listeners: []gatewayv1beta1.ListenerStatus{
+				{
+					Name:           "test-listener-1",
+					AttachedRoutes: 1,
+				},
+			},
 		},
 	}
+}
+
+func (a *Gateway) GetListenerNameByHost(host string) string {
+	listenerName := ""
+	for _, listener := range a.Spec.Listeners {
+		if *(*string)(listener.Hostname) == host {
+			listenerName = string(listener.Name)
+		}
+	}
+	return listenerName
+
+}
+
+// Gather all listener statuses in all gateway statuses that match the given listener name
+func (a *Gateway) GetListenerStatusesByListenerName(listenerName string) []gatewayv1beta1.ListenerStatus {
+	listenerStatuses := []gatewayv1beta1.ListenerStatus{}
+	for _, gatewayStatus := range a.GetGatewayStatuses() {
+		for _, listenerStatus := range gatewayStatus.Listeners {
+			if string(listenerStatus.Name) == listenerName {
+				listenerStatuses = append(listenerStatuses, listenerStatus)
+			}
+		}
+	}
+	return listenerStatuses
 }
 
 func (a *Gateway) ExposesOwnController() bool {

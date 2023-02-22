@@ -309,7 +309,7 @@ var _ = Describe("GatewayController", func() {
 			}
 		})
 
-		It("should create a gateway", func() {
+		It("should reconcile a gateway", func() {
 			Expect(k8sClient.Create(ctx, gateway)).To(BeNil())
 			createdGateway := &gatewayv1beta1.Gateway{}
 			gatewayType := types.NamespacedName{Name: gateway.Name, Namespace: gateway.Namespace}
@@ -329,7 +329,7 @@ var _ = Describe("GatewayController", func() {
 					log.Log.Error(err, "No errors expected")
 					Fail("No errors expected")
 				}
-				acceptedCondition = findConditionByType(createdGateway.Status.Conditions, gatewayv1beta1.GatewayConditionAccepted)
+				acceptedCondition = getConditionByType(createdGateway.Status.Conditions, gatewayv1beta1.GatewayConditionAccepted)
 				log.Log.Info("acceptedCondition", "acceptedCondition", acceptedCondition)
 				Expect(acceptedCondition).ToNot(BeNil())
 				return acceptedCondition.Status == metav1.ConditionTrue
@@ -345,7 +345,7 @@ var _ = Describe("GatewayController", func() {
 					log.Log.Error(err, "No errors expected")
 					Fail("No errors expected")
 				}
-				programmedCondition = findConditionByType(createdGateway.Status.Conditions, gatewayv1beta1.GatewayConditionProgrammed)
+				programmedCondition = getConditionByType(createdGateway.Status.Conditions, gatewayv1beta1.GatewayConditionProgrammed)
 				log.Log.Info("programmedCondition", "programmedCondition", programmedCondition)
 				Expect(programmedCondition).ToNot(BeNil())
 				return programmedCondition.Status == metav1.ConditionUnknown
@@ -375,7 +375,7 @@ var _ = Describe("GatewayController", func() {
 					log.Log.Error(err, "No errors expected")
 					Fail("No errors expected")
 				}
-				programmedCondition = findConditionByType(createdGateway.Status.Conditions, gatewayv1beta1.GatewayConditionProgrammed)
+				programmedCondition = getConditionByType(createdGateway.Status.Conditions, gatewayv1beta1.GatewayConditionProgrammed)
 				log.Log.Info("programmedCondition", "programmedCondition", programmedCondition)
 				Expect(programmedCondition).ToNot(BeNil())
 				return programmedCondition.Status == metav1.ConditionTrue
@@ -417,7 +417,7 @@ var _ = Describe("GatewayController", func() {
 					log.Log.Error(err, "No errors expected")
 					Fail("No errors expected")
 				}
-				acceptedCondition = findConditionByType(createdGateway.Status.Conditions, gatewayv1beta1.GatewayConditionAccepted)
+				acceptedCondition = getConditionByType(createdGateway.Status.Conditions, gatewayv1beta1.GatewayConditionAccepted)
 				log.Log.Info("acceptedCondition", "acceptedCondition", acceptedCondition)
 				Expect(acceptedCondition).ToNot(BeNil())
 				return acceptedCondition.Status == metav1.ConditionTrue
@@ -433,7 +433,7 @@ var _ = Describe("GatewayController", func() {
 					log.Log.Error(err, "No errors expected")
 					Fail("No errors expected")
 				}
-				programmedCondition = findConditionByType(createdGateway.Status.Conditions, gatewayv1beta1.GatewayConditionProgrammed)
+				programmedCondition = getConditionByType(createdGateway.Status.Conditions, gatewayv1beta1.GatewayConditionProgrammed)
 				log.Log.Info("programmedCondition", "programmedCondition", programmedCondition)
 				Expect(programmedCondition).ToNot(BeNil())
 				return programmedCondition.Status == metav1.ConditionFalse

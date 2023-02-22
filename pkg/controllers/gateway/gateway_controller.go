@@ -44,6 +44,12 @@ const (
 	GatewayClusterLabelSelectorAnnotation = "kuadrant.io/gateway-cluster-label-selector"
 )
 
+type GatewayHelper interface {
+	GetGatewayStatuses() []gatewayv1beta1.GatewayStatus
+	GetListenerNameByHost(host string) string
+	GetListenerStatusesByListenerName(listenerName string) []gatewayv1beta1.ListenerStatus
+}
+
 // GatewayReconciler reconciles a Gateway object
 type GatewayReconciler struct {
 	client.Client
@@ -171,7 +177,7 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			//sync secret to clusters
 			if secret != nil {
 				updatedSecret := secret.DeepCopy()
-				applyClusterSyncerAnnotationsToObject(updatedSecret, clusters)
+				syncObjectToClusters(updatedSecret, clusters)
 				if !reflect.DeepEqual(updatedSecret, secret) {
 					log.Info("Updating Certificate secret annotations", "secret", secret.Name)
 					err = r.Update(ctx, updatedSecret)
@@ -192,37 +198,60 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 		zones := r.Host.GetManagedZones()
 		hostKey := shortuuid.NewWithNamespace(trafficAccessor.GetNamespace() + trafficAccessor.GetName())
+		hasAnyAttachedRoutes := false
 		for _, host := range hosts {
-			var chosenZone dns.Zone
-			// TODO: Validate hosts against managed zones before creating dns record & certificate.
-			//       Custom hosts with certificates are OK and we'll skip these
-			for _, z := range zones {
-				if z.Default {
-					chosenZone = z
+			// Only consider host for dns if there's at least 1 attached route to the listener in *any* gateway
+			gatewayHelper := trafficAccessor.(GatewayHelper)
+			listenerName := gatewayHelper.GetListenerNameByHost(host)
+			listenerStatuses := gatewayHelper.GetListenerStatusesByListenerName(listenerName)
+			hasAttachedRoutes := false
+			for _, listenerStatus := range listenerStatuses {
+				if listenerStatus.AttachedRoutes > 0 {
+					hasAttachedRoutes = true
 					break
 				}
 			}
-			if chosenZone.ID == "" {
-				log.Info("No zone to use")
-				// ignoring & moving on
+			log.Info("hasAttachedRoutes", "hasAttachedRoutes", hasAttachedRoutes)
+
+			if hasAttachedRoutes {
+				hasAnyAttachedRoutes = true
+				var chosenZone dns.Zone
+				// TODO: Validate hosts against managed zones before creating dns record & certificate.
+				//       Custom hosts with certificates are OK and we'll skip these
+				for _, z := range zones {
+					if z.Default {
+						chosenZone = z
+						break
+					}
+				}
+				if chosenZone.ID == "" {
+					log.Info("No zone to use")
+					// ignoring & moving on
+				}
+				// TODO: ownerRefs e.g.
+				// err = controllerutil.SetControllerReference(parentZone, nsRecord, r.Scheme)
+				record, err := r.Host.RegisterHost(ctx, host, hostKey, chosenZone.DNSZone)
+				if err != nil {
+					log.Error(err, "failed to register host ")
+					return ctrl.Result{}, err
+				}
+				log.Info("Registered Host", "record", record)
 			}
-			// TODO: ownerRefs e.g.
-			// err = controllerutil.SetControllerReference(parentZone, nsRecord, r.Scheme)
-			record, err := r.Host.RegisterHost(ctx, host, hostKey, chosenZone.DNSZone)
-			if err != nil {
-				log.Error(err, "failed to register host ")
-				return ctrl.Result{}, err
-			}
-			log.Info("Registered Host", "record", record)
+		}
+		if !hasAnyAttachedRoutes {
+			log.Info("no hosts have any attached routes in any gateway yet")
+			return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 10}, nil
 		}
 
+		// TODO: Do we need to check attachedRoutes again for each dns record, or is the logic above sufficient
+		//       to ensure a record won't be created too early
 		err = r.Host.AddEndPoints(ctx, trafficAccessor)
 		if err != nil {
 			log.Error(err, "Error adding endpoints")
 			return ctrl.Result{}, err
 		}
 
-		applyClusterSyncerAnnotationsToObject(gateway, clusters)
+		syncObjectToClusters(gateway, clusters)
 		if !reflect.DeepEqual(gateway, previous) {
 			log.Info("Updating Gateway", "gateway", gateway)
 			err = r.Update(ctx, gateway)
@@ -254,7 +283,7 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	return ctrl.Result{}, nil
 }
 
-func applyClusterSyncerAnnotationsToObject(obj metav1.Object, clusters []string) {
+func syncObjectToClusters(obj metav1.Object, clusters []string) {
 	annotations := obj.GetAnnotations()
 	if len(annotations) == 0 {
 		annotations = map[string]string{}
@@ -265,7 +294,7 @@ func applyClusterSyncerAnnotationsToObject(obj metav1.Object, clusters []string)
 	obj.SetAnnotations(annotations)
 }
 
-func findConditionByType(conditions []metav1.Condition, conditionType gatewayv1beta1.GatewayConditionType) *metav1.Condition {
+func getConditionByType(conditions []metav1.Condition, conditionType gatewayv1beta1.GatewayConditionType) *metav1.Condition {
 	for _, condition := range conditions {
 		if condition.Type == string(conditionType) {
 			return &condition
