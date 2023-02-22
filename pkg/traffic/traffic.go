@@ -25,7 +25,6 @@ type Interface interface {
 	GetNamespaceName() types.NamespacedName
 	AddTLS(host string, secret *corev1.Secret)
 	HasTLS() bool
-	GetTLS() []TLSConfig
 	RemoveTLS(host []string)
 	GetSpec() interface{}
 	GetDNSTargets() ([]v1alpha1.Target, error)

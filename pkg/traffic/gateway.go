@@ -53,23 +53,6 @@ func (a *Gateway) HasTLS() bool {
 	return hasTLS
 }
 
-func (a *Gateway) GetTLS() []TLSConfig {
-	tls := []TLSConfig{}
-
-	for _, listener := range a.Spec.Listeners {
-		if listener.TLS != nil {
-			tls = append(tls, TLSConfig{
-				// TODO: Allow for 0 or multiple hosts in 1 listener
-				Hosts: []string{fmt.Sprint(listener.Hostname)},
-				// TODO: Allow for 0 or multiple certificate refs
-				SecretName: string(listener.TLS.CertificateRefs[0].Name),
-			})
-		}
-	}
-
-	return tls
-}
-
 func (a *Gateway) AddTLS(host string, secret *corev1.Secret) {
 	listeners := []gatewayv1beta1.Listener{}
 
