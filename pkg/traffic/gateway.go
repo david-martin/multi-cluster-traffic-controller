@@ -29,6 +29,9 @@ func (a *Gateway) GetHosts() []string {
 	var hosts []string
 	for _, listener := range a.Spec.Listeners {
 		host := (*string)(listener.Hostname)
+		if host == nil {
+			continue
+		}
 		if !slices.Contains(hosts, *host) {
 			hosts = append(hosts, *host)
 		}
@@ -136,7 +139,7 @@ func (a *Gateway) GetGatewayStatuses() []gatewayv1beta1.GatewayStatus {
 			},
 			Listeners: []gatewayv1beta1.ListenerStatus{
 				{
-					Name:           "test-listener-1",
+					Name:           "default",
 					AttachedRoutes: 1,
 				},
 			},

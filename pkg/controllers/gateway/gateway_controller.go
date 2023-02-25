@@ -28,6 +28,7 @@ import (
 	"github.com/Kuadrant/multi-cluster-traffic-controller/pkg/_internal/slice"
 	v1 "github.com/Kuadrant/multi-cluster-traffic-controller/pkg/apis/v1"
 	"github.com/Kuadrant/multi-cluster-traffic-controller/pkg/dns"
+	"github.com/Kuadrant/multi-cluster-traffic-controller/pkg/syncer"
 	"github.com/Kuadrant/multi-cluster-traffic-controller/pkg/traffic"
 	"github.com/lithammer/shortuuid/v4"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
@@ -112,185 +113,222 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	}
 
 	gateway := previous.DeepCopy()
-	acceptedCondition := metav1.Condition{
-		LastTransitionTime: metav1.Now(),
-		Message:            fmt.Sprintf("Handled by %s", ControllerName),
-		Reason:             string(gatewayv1beta1.GatewayConditionAccepted),
-		Status:             metav1.ConditionTrue,
-		Type:               string(gatewayv1beta1.GatewayConditionAccepted),
-		ObservedGeneration: previous.Generation,
+	acceptedStatus := metav1.ConditionTrue
+	programmedStatus, clusters, requeue, reconcileErr := r.reconcileGateway(ctx, *previous, *gateway)
+	log.Info("5 gateway listener", "gatewayListener", gateway.Spec.Listeners[0])
+
+	// Update gateway spec/metadata
+	if !reflect.DeepEqual(gateway, previous) {
+		log.Info("Updating Gateway", "gateway", gateway.Spec, "previous", previous.Spec)
+		err = r.Update(ctx, gateway)
+		if err != nil {
+			log.Error(err, "Error updating Gateway")
+		}
 	}
 
-	clusters := selectClusters(*gateway)
-	var programmedCondition metav1.Condition
-	// Update initial Programmed status
-	if len(clusters) > 0 {
-		programmedCondition = metav1.Condition{
-			LastTransitionTime: metav1.Now(),
-			Message:            "Waiting for controller",
-			Reason:             string(gatewayv1beta1.GatewayReasonPending),
-			Status:             metav1.ConditionUnknown,
-			Type:               string(gatewayv1beta1.GatewayConditionProgrammed),
-			ObservedGeneration: previous.Generation,
-		}
-	} else {
-		programmedCondition = metav1.Condition{
-			LastTransitionTime: metav1.Now(),
-			Message:            "No clusters match selection",
-			Reason:             string(gatewayv1beta1.GatewayReasonPending),
-			Status:             metav1.ConditionFalse,
-			Type:               string(gatewayv1beta1.GatewayConditionProgrammed),
-			ObservedGeneration: previous.Generation,
-		}
-	}
-	// Save status conditions at this point
-	gateway.Status.Conditions = []metav1.Condition{acceptedCondition, programmedCondition}
+	// Update status
+	gateway.Status.Conditions = buildStatusConditions(gateway.Status, previous.Generation, clusters, acceptedStatus, programmedStatus)
 	if !reflect.DeepEqual(gateway.Status, previous.Status) {
-		log.Info("Updating Gateway status", "gatewayStatus", gateway.Status)
+		log.Info("Updating Gateway status", "gatewayStatus", gateway.Status, "previousStatus", previous.Status)
 		err = r.Status().Update(ctx, gateway)
 		if err != nil {
-			return ctrl.Result{}, err
+			log.Error(err, "Error updating Gateway status")
 		}
 	}
 
+	if requeue {
+		return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 10}, reconcileErr
+	}
+	return ctrl.Result{}, reconcileErr
+}
+
+// Configures Gateway tls & dns for each cluster it targets.
+// Returns the programmed status, a list of clusters that were programmed, if the gateway should be requeued, and any error
+func (r *GatewayReconciler) reconcileGateway(ctx context.Context, previous gatewayv1beta1.Gateway, gateway gatewayv1beta1.Gateway) (metav1.ConditionStatus, []string, bool, error) {
+	log := log.FromContext(ctx)
+
+	clusters := selectClusters(gateway)
 	// Don't do anything else until at least 1 cluster matches.
-	if len(clusters) > 0 {
-		trafficAccessor := traffic.NewGateway(gateway)
-		hosts := trafficAccessor.GetHosts()
+	if len(clusters) == 0 {
+		// TODO: Handle any cleanup if there were previously clusters
+		return metav1.ConditionFalse, clusters, false, nil
+	}
+	trafficAccessor := traffic.NewGateway(&gateway)
+	hosts := trafficAccessor.GetHosts()
 
-		log.Info("hosts", "hosts", hosts)
-		for _, host := range hosts {
-			// create certificate resource for assigned host
-			if err := r.Certificates.EnsureCertificate(ctx, host, gateway); err != nil && !k8serrors.IsAlreadyExists(err) {
-				log.Error(err, "Error ensuring certificate")
-				return ctrl.Result{}, err
-			}
-
-			// Check if certificate secret is ready
-			secret, err := r.Certificates.GetCertificateSecret(ctx, host)
-			if err != nil && !k8serrors.IsNotFound(err) {
-				log.Error(err, "Error getting certificate secret")
-				return ctrl.Result{}, err
-			}
-			if err != nil {
-				log.Info("tls secret does not exist yet for host " + host + " requeue")
-				return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 10}, nil
-			}
-			log.Info("certificate exists for host", "host", host)
-
-			//sync secret to clusters
-			if secret != nil {
-				updatedSecret := secret.DeepCopy()
-				syncObjectToClusters(updatedSecret, clusters)
-				if !reflect.DeepEqual(updatedSecret, secret) {
-					log.Info("Updating Certificate secret annotations", "secret", secret.Name)
-					err = r.Update(ctx, updatedSecret)
-					if err != nil {
-						return ctrl.Result{}, err
-					}
-				}
-				trafficAccessor.AddTLS(host, secret)
-			}
-			// Secrets don't have a status, so we can't say for sure if it's synced OK. Optimism here.
-			log.Info("certificate secret in place for host. Adding dns endpoints", "host", host)
+	log.Info("hosts", "hosts", hosts)
+	for _, host := range hosts {
+		// create certificate resource for assigned host
+		if err := r.Certificates.EnsureCertificate(ctx, host, &gateway); err != nil && !k8serrors.IsAlreadyExists(err) {
+			log.Error(err, "Error ensuring certificate")
+			return metav1.ConditionUnknown, clusters, false, err
 		}
 
-		// TODO: Move this logic into dns service?
-		zones := r.Host.GetManagedZones()
-		hostKey := shortuuid.NewWithNamespace(trafficAccessor.GetNamespace() + trafficAccessor.GetName())
-		hasAnyAttachedRoutes := false
-		for _, host := range hosts {
-			// Only consider host for dns if there's at least 1 attached route to the listener in *any* gateway
-			gatewayHelper := trafficAccessor.(GatewayHelper)
-			listenerName := gatewayHelper.GetListenerNameByHost(host)
-			listenerStatuses := gatewayHelper.GetListenerStatusesByListenerName(listenerName)
-			hasAttachedRoutes := false
-			for _, listenerStatus := range listenerStatuses {
-				if listenerStatus.AttachedRoutes > 0 {
-					hasAttachedRoutes = true
+		// Check if certificate secret is ready
+		secret, err := r.Certificates.GetCertificateSecret(ctx, host)
+		if err != nil && !k8serrors.IsNotFound(err) {
+			log.Error(err, "Error getting certificate secret")
+			return metav1.ConditionUnknown, clusters, false, err
+		}
+		if err != nil {
+			log.Info("tls secret does not exist yet for host " + host + " requeue")
+			return metav1.ConditionUnknown, clusters, true, err
+		}
+		log.Info("certificate exists for host", "host", host)
+
+		//sync secret to clusters
+		if secret != nil {
+			updatedSecret := secret.DeepCopy()
+			syncObjectToAllClusters(updatedSecret)
+			if !reflect.DeepEqual(updatedSecret, secret) {
+				log.Info("Updating Certificate secret annotations", "secret", secret.Name)
+				err = r.Update(ctx, updatedSecret)
+				if err != nil {
+					return metav1.ConditionUnknown, clusters, false, err
+				}
+			}
+			log.Info("1 gateway listener", "gatewayListener", gateway.Spec.Listeners[0])
+			trafficAccessor.AddTLS(host, secret)
+			log.Info("2 gateway listener", "gatewayListener", gateway.Spec.Listeners[0])
+		}
+		// Secrets don't have a status, so we can't say for sure if it's synced OK. Optimism here.
+		log.Info("certificate secret in place for host. Adding dns endpoints", "host", host)
+	}
+
+	// TODO: Move this logic into dns service?
+	zones := r.Host.GetManagedZones()
+	hostKey := shortuuid.NewWithNamespace(trafficAccessor.GetNamespace() + trafficAccessor.GetName())
+	hasAnyAttachedRoutes := false
+	for _, host := range hosts {
+		// Only consider host for dns if there's at least 1 attached route to the listener in *any* gateway
+		gatewayHelper := trafficAccessor.(GatewayHelper)
+		listenerName := gatewayHelper.GetListenerNameByHost(host)
+		listenerStatuses := gatewayHelper.GetListenerStatusesByListenerName(listenerName)
+		hasAttachedRoutes := false
+		for _, listenerStatus := range listenerStatuses {
+			if listenerStatus.AttachedRoutes > 0 {
+				hasAttachedRoutes = true
+				break
+			}
+		}
+		log.Info("hasAttachedRoutes", "host", host, "listenerName", listenerName, "hasAttachedRoutes", hasAttachedRoutes)
+
+		if hasAttachedRoutes {
+			hasAnyAttachedRoutes = true
+			var chosenZone dns.Zone
+			// TODO: Validate hosts against managed zones before creating dns record & certificate.
+			//       Custom hosts with certificates are OK and we'll skip these
+			for _, z := range zones {
+				if z.Default {
+					chosenZone = z
 					break
 				}
 			}
-			log.Info("hasAttachedRoutes", "hasAttachedRoutes", hasAttachedRoutes)
-
-			if hasAttachedRoutes {
-				hasAnyAttachedRoutes = true
-				var chosenZone dns.Zone
-				// TODO: Validate hosts against managed zones before creating dns record & certificate.
-				//       Custom hosts with certificates are OK and we'll skip these
-				for _, z := range zones {
-					if z.Default {
-						chosenZone = z
-						break
-					}
-				}
-				if chosenZone.ID == "" {
-					log.Info("No zone to use")
-					// ignoring & moving on
-				}
-				// TODO: ownerRefs e.g.
-				// err = controllerutil.SetControllerReference(parentZone, nsRecord, r.Scheme)
-				record, err := r.Host.RegisterHost(ctx, host, hostKey, chosenZone.DNSZone)
-				if err != nil {
-					log.Error(err, "failed to register host ")
-					return ctrl.Result{}, err
-				}
-				log.Info("Registered Host", "record", record)
+			if chosenZone.ID == "" {
+				log.Info("No zone to use")
+				// ignoring & moving on
 			}
-		}
-		if !hasAnyAttachedRoutes {
-			log.Info("no hosts have any attached routes in any gateway yet")
-			return ctrl.Result{Requeue: true, RequeueAfter: time.Second * 10}, nil
-		}
-
-		// TODO: Do we need to check attachedRoutes again for each dns record, or is the logic above sufficient
-		//       to ensure a record won't be created too early
-		err = r.Host.AddEndPoints(ctx, trafficAccessor)
-		if err != nil {
-			log.Error(err, "Error adding endpoints")
-			return ctrl.Result{}, err
-		}
-
-		syncObjectToClusters(gateway, clusters)
-		if !reflect.DeepEqual(gateway, previous) {
-			log.Info("Updating Gateway", "gateway", gateway)
-			err = r.Update(ctx, gateway)
+			// TODO: ownerRefs e.g.
+			// err = controllerutil.SetControllerReference(parentZone, nsRecord, r.Scheme)
+			record, err := r.Host.RegisterHost(ctx, host, hostKey, chosenZone.DNSZone)
 			if err != nil {
-				return ctrl.Result{}, err
+				log.Error(err, "failed to register host ")
+				return metav1.ConditionUnknown, clusters, false, err
 			}
+			log.Info("Registered Host", "record", record)
 		}
+	}
+	syncObjectToAllClusters(&gateway)
+	log.Info("3 gateway listener", "gatewayListener", gateway.Spec.Listeners[0])
 
-		// Update programmed condition
-		programmedCondition = metav1.Condition{
+	if !hasAnyAttachedRoutes {
+		log.Info("no hosts have any attached routes in any gateway yet")
+		return metav1.ConditionUnknown, clusters, true, nil
+	}
+
+	// TODO: Do we need to check attachedRoutes again for each dns record, or is the logic above sufficient
+	//       to ensure a record won't be created too early
+	err := r.Host.AddEndPoints(ctx, trafficAccessor)
+	if err != nil {
+		log.Error(err, "Error adding endpoints")
+		return metav1.ConditionUnknown, clusters, false, err
+	}
+	log.Info("4 gateway listener", "gatewayListener", gateway.Spec.Listeners[0])
+
+	return metav1.ConditionTrue, clusters, false, nil
+}
+
+func buildStatusConditions(gatewayStatus gatewayv1beta1.GatewayStatus, generation int64, clusters []string, acceptedStatus metav1.ConditionStatus, programmedStatus metav1.ConditionStatus) []metav1.Condition {
+	acceptedCondition := getConditionByType(gatewayStatus.Conditions, gatewayv1beta1.GatewayConditionAccepted)
+	if (acceptedCondition == nil) || (acceptedCondition.Status != acceptedStatus) {
+		// State has changed
+		acceptedCondition = &metav1.Condition{
 			LastTransitionTime: metav1.Now(),
-			Message:            fmt.Sprintf("Gateway configured in data plane cluster(s) - [%v]", strings.Join(clusters, ",")),
-			Reason:             string(gatewayv1beta1.GatewayConditionProgrammed),
+			Message:            fmt.Sprintf("Handled by %s", ControllerName),
+			Reason:             string(gatewayv1beta1.GatewayConditionAccepted),
 			Status:             metav1.ConditionTrue,
-			Type:               string(gatewayv1beta1.GatewayConditionProgrammed),
-			ObservedGeneration: previous.Generation,
-		}
-		// Update status conditions again
-		gateway.Status.Conditions = []metav1.Condition{acceptedCondition, programmedCondition}
-		if !reflect.DeepEqual(gateway.Status, previous.Status) {
-			log.Info("Updating Gateway status", "gatewayStatus", gateway.Status)
-			err = r.Status().Update(ctx, gateway)
-			if err != nil {
-				return ctrl.Result{}, err
-			}
+			Type:               string(gatewayv1beta1.GatewayConditionAccepted),
+			ObservedGeneration: generation,
 		}
 	}
 
-	return ctrl.Result{}, nil
+	programmedCondition := getConditionByType(gatewayStatus.Conditions, gatewayv1beta1.GatewayConditionProgrammed)
+	if (programmedCondition == nil) || (programmedCondition.Status != programmedStatus) || (programmedCondition.ObservedGeneration != generation) {
+		// State has changed
+		if programmedStatus == metav1.ConditionFalse {
+			programmedCondition = &metav1.Condition{
+				LastTransitionTime: metav1.Now(),
+				Message:            "No clusters match selection",
+				Reason:             string(gatewayv1beta1.GatewayReasonPending),
+				Status:             metav1.ConditionFalse,
+				Type:               string(gatewayv1beta1.GatewayConditionProgrammed),
+				ObservedGeneration: generation,
+			}
+		} else if programmedStatus == metav1.ConditionTrue {
+			programmedCondition = &metav1.Condition{
+				LastTransitionTime: metav1.Now(),
+				Message:            fmt.Sprintf("Gateway configured in data plane cluster(s) - [%v]", strings.Join(clusters, ",")),
+				Reason:             string(gatewayv1beta1.GatewayConditionProgrammed),
+				Status:             metav1.ConditionTrue,
+				Type:               string(gatewayv1beta1.GatewayConditionProgrammed),
+				ObservedGeneration: generation,
+			}
+		} else {
+			// assume condition unknown i.e. programming is pending
+			programmedCondition = &metav1.Condition{
+				LastTransitionTime: metav1.Now(),
+				Message:            "Waiting for controller",
+				Reason:             string(gatewayv1beta1.GatewayReasonPending),
+				Status:             metav1.ConditionUnknown,
+				Type:               string(gatewayv1beta1.GatewayConditionProgrammed),
+				ObservedGeneration: generation,
+			}
+		}
+	}
+	return []metav1.Condition{*acceptedCondition, *programmedCondition}
 }
 
-func syncObjectToClusters(obj metav1.Object, clusters []string) {
+// func syncObjectToClusters(obj metav1.Object, clusters []string) {
+// 	annotations := obj.GetAnnotations()
+// 	if len(annotations) == 0 {
+// 		annotations = map[string]string{}
+// 	}
+// 	for _, cluster := range clusters {
+// 		annotations[fmt.Sprintf("%s/%s", syncer.MCTC_SYNC_ANNOTATION_PREFIX, cluster)] = "true"
+// 	}
+// 	obj.SetAnnotations(annotations)
+// }
+
+// TODO: Remove. This is a hack to enable simple 'all' placement of a resource
+//
+//		 in lieu of cluster representation in control plane.
+//	     Use the above commented function instead.
+func syncObjectToAllClusters(obj metav1.Object) {
 	annotations := obj.GetAnnotations()
 	if len(annotations) == 0 {
 		annotations = map[string]string{}
 	}
-	for _, cluster := range clusters {
-		annotations[fmt.Sprintf("%s/%s", ClusterSyncerAnnotation, cluster)] = "True"
-	}
+	annotations[fmt.Sprintf("%s%s", syncer.MCTC_SYNC_ANNOTATION_PREFIX, syncer.MCTC_SYNC_ANNOTATION_WILDCARD)] = "true"
 	obj.SetAnnotations(annotations)
 }
 

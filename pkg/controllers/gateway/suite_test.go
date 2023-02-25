@@ -15,11 +15,13 @@ package gateway
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
 
 	v1 "github.com/Kuadrant/multi-cluster-traffic-controller/pkg/apis/v1"
+	"github.com/Kuadrant/multi-cluster-traffic-controller/pkg/syncer"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -279,7 +281,7 @@ var _ = Describe("GatewayController", func() {
 					GatewayClassName: "mctc-gw-istio-external-instance-per-cluster",
 					Listeners: []gatewayv1beta1.Listener{
 						{
-							Name:     "test-listener-1",
+							Name:     "default",
 							Port:     8443,
 							Protocol: gatewayv1beta1.HTTPSProtocolType,
 							Hostname: &hostname,
@@ -382,16 +384,14 @@ var _ = Describe("GatewayController", func() {
 			}, TestTimeoutMedium, TestRetryIntervalMedium).Should(BeTrue())
 			Expect(programmedCondition.Message).To(BeEquivalentTo("Gateway configured in data plane cluster(s) - [test_cluster_one]"))
 
+			// sync annotation is set
+			syncAnnotation := createdGateway.Annotations[fmt.Sprintf("%s%s", syncer.MCTC_SYNC_ANNOTATION_PREFIX, syncer.MCTC_SYNC_ANNOTATION_WILDCARD)]
+			Expect(syncAnnotation).To(BeEquivalentTo("true"))
+
 			// TLS config added to listener
-			Eventually(func() bool {
-				err := k8sClient.Get(ctx, gatewayType, createdGateway)
-				if err != nil {
-					log.Log.Error(err, "No errors expected")
-					Fail("No errors expected")
-				}
-				return createdGateway.Spec.Listeners[0].TLS != nil
-			}, TestTimeoutMedium, TestRetryIntervalMedium).Should(BeTrue())
 			listener := createdGateway.Spec.Listeners[0]
+			Expect(listener.Name).To(BeEquivalentTo("default"))
+			Expect(listener.TLS).ToNot(BeNil())
 			certificateRef := listener.TLS.CertificateRefs[0]
 			Expect(certificateRef.Name).To(BeEquivalentTo("test.example.com"))
 		})
