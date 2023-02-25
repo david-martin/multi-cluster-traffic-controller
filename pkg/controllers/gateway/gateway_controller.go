@@ -114,8 +114,7 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	gateway := previous.DeepCopy()
 	acceptedStatus := metav1.ConditionTrue
-	programmedStatus, clusters, requeue, reconcileErr := r.reconcileGateway(ctx, *previous, *gateway)
-	log.Info("5 gateway listener", "gatewayListener", gateway.Spec.Listeners[0])
+	programmedStatus, clusters, requeue, reconcileErr := r.reconcileGateway(ctx, *previous, gateway)
 
 	// Update gateway spec/metadata
 	if !reflect.DeepEqual(gateway, previous) {
@@ -144,22 +143,22 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 // Configures Gateway tls & dns for each cluster it targets.
 // Returns the programmed status, a list of clusters that were programmed, if the gateway should be requeued, and any error
-func (r *GatewayReconciler) reconcileGateway(ctx context.Context, previous gatewayv1beta1.Gateway, gateway gatewayv1beta1.Gateway) (metav1.ConditionStatus, []string, bool, error) {
+func (r *GatewayReconciler) reconcileGateway(ctx context.Context, previous gatewayv1beta1.Gateway, gateway *gatewayv1beta1.Gateway) (metav1.ConditionStatus, []string, bool, error) {
 	log := log.FromContext(ctx)
 
-	clusters := selectClusters(gateway)
+	clusters := selectClusters(*gateway)
 	// Don't do anything else until at least 1 cluster matches.
 	if len(clusters) == 0 {
 		// TODO: Handle any cleanup if there were previously clusters
 		return metav1.ConditionFalse, clusters, false, nil
 	}
-	trafficAccessor := traffic.NewGateway(&gateway)
+	trafficAccessor := traffic.NewGateway(gateway)
 	hosts := trafficAccessor.GetHosts()
 
 	log.Info("hosts", "hosts", hosts)
 	for _, host := range hosts {
 		// create certificate resource for assigned host
-		if err := r.Certificates.EnsureCertificate(ctx, host, &gateway); err != nil && !k8serrors.IsAlreadyExists(err) {
+		if err := r.Certificates.EnsureCertificate(ctx, host, gateway); err != nil && !k8serrors.IsAlreadyExists(err) {
 			log.Error(err, "Error ensuring certificate")
 			return metav1.ConditionUnknown, clusters, false, err
 		}
@@ -187,9 +186,7 @@ func (r *GatewayReconciler) reconcileGateway(ctx context.Context, previous gatew
 					return metav1.ConditionUnknown, clusters, false, err
 				}
 			}
-			log.Info("1 gateway listener", "gatewayListener", gateway.Spec.Listeners[0])
 			trafficAccessor.AddTLS(host, secret)
-			log.Info("2 gateway listener", "gatewayListener", gateway.Spec.Listeners[0])
 		}
 		// Secrets don't have a status, so we can't say for sure if it's synced OK. Optimism here.
 		log.Info("certificate secret in place for host. Adding dns endpoints", "host", host)
@@ -238,8 +235,7 @@ func (r *GatewayReconciler) reconcileGateway(ctx context.Context, previous gatew
 			log.Info("Registered Host", "record", record)
 		}
 	}
-	syncObjectToAllClusters(&gateway)
-	log.Info("3 gateway listener", "gatewayListener", gateway.Spec.Listeners[0])
+	syncObjectToAllClusters(gateway)
 
 	if !hasAnyAttachedRoutes {
 		log.Info("no hosts have any attached routes in any gateway yet")
@@ -253,7 +249,6 @@ func (r *GatewayReconciler) reconcileGateway(ctx context.Context, previous gatew
 		log.Error(err, "Error adding endpoints")
 		return metav1.ConditionUnknown, clusters, false, err
 	}
-	log.Info("4 gateway listener", "gatewayListener", gateway.Spec.Listeners[0])
 
 	return metav1.ConditionTrue, clusters, false, nil
 }
