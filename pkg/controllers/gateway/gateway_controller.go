@@ -255,7 +255,7 @@ func (r *GatewayReconciler) reconcileGateway(ctx context.Context, previous gatew
 
 func buildStatusConditions(gatewayStatus gatewayv1beta1.GatewayStatus, generation int64, clusters []string, acceptedStatus metav1.ConditionStatus, programmedStatus metav1.ConditionStatus) []metav1.Condition {
 	acceptedCondition := getConditionByType(gatewayStatus.Conditions, gatewayv1beta1.GatewayConditionAccepted)
-	if (acceptedCondition == nil) || (acceptedCondition.Status != acceptedStatus) {
+	if (acceptedCondition == nil) || (acceptedCondition.Status != acceptedStatus) || (acceptedCondition.ObservedGeneration != generation) {
 		// State has changed
 		acceptedCondition = &metav1.Condition{
 			LastTransitionTime: metav1.Now(),

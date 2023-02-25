@@ -10,7 +10,7 @@ spec:
   - name: default
     port: 80
     protocol: HTTP
-    hostname: "test.example.com"
+    hostname: "test.dev.hcpapps.net"
     allowedRoutes:
       namespaces:
         from: All
