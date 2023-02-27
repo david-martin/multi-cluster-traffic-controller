@@ -253,6 +253,7 @@ var _ = Describe("GatewayController", func() {
 	Context("testing gateway controller", func() {
 		var gateway *gatewayv1beta1.Gateway
 		var gatewayclass *gatewayv1beta1.GatewayClass
+		var managedZone *v1alpha1.ManagedZone
 		// var cluster1 *corev1.Secret
 		BeforeEach(func() {
 			// Create a test GatewayClass for test Gateways to reference
@@ -266,6 +267,20 @@ var _ = Describe("GatewayController", func() {
 				},
 			}
 			Expect(k8sClient.Create(ctx, gatewayclass)).To(BeNil())
+
+			// Create a test ManagedZone for test Gateway listeners to use
+			managedZone = &v1alpha1.ManagedZone{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "example.com",
+					Namespace: "default",
+				},
+				Spec: v1alpha1.ManagedZoneSpec{
+					ID:          "1234",
+					DomainName:  "example.com",
+					Description: "example.com",
+				},
+			}
+			Expect(k8sClient.Create(ctx, managedZone)).To(BeNil())
 
 			// Stub Gateway for tests
 			hostname := gatewayv1beta1.Hostname("test.example.com")
@@ -309,6 +324,16 @@ var _ = Describe("GatewayController", func() {
 				err = k8sClient.Delete(ctx, &gatewayclass)
 				Expect(err).NotTo(HaveOccurred())
 			}
+
+			// Clean up ManagedZones
+			managedZoneList := &v1alpha1.ManagedZoneList{}
+			err = k8sClient.List(ctx, managedZoneList, client.InNamespace("default"))
+			Expect(err).NotTo(HaveOccurred())
+			for _, managedZone := range managedZoneList.Items {
+				err = k8sClient.Delete(ctx, &managedZone)
+				Expect(err).NotTo(HaveOccurred())
+			}
+
 		})
 
 		It("should reconcile a gateway", func() {
