@@ -10,7 +10,7 @@ import (
 	gatewayv1beta1 "sigs.k8s.io/gateway-api/apis/v1beta1"
 
 	"github.com/Kuadrant/multi-cluster-traffic-controller/pkg/_internal/slice"
-	kuadrantv1 "github.com/Kuadrant/multi-cluster-traffic-controller/pkg/apis/v1"
+	v1alpha1 "github.com/Kuadrant/multi-cluster-traffic-controller/pkg/apis/v1alpha1"
 )
 
 func NewGateway(g *gatewayv1beta1.Gateway) Interface {
@@ -106,8 +106,8 @@ func (a *Gateway) String() string {
 }
 
 // GetDNSTargets will return the LB hosts and or IPs from the the Ingress object associated with the cluster they came from
-func (a *Gateway) GetDNSTargets() ([]kuadrantv1.Target, error) {
-	dnsTargets := []kuadrantv1.Target{}
+func (a *Gateway) GetDNSTargets() ([]v1alpha1.Target, error) {
+	dnsTargets := []v1alpha1.Target{}
 
 	for _, gatewayStatus := range a.GetGatewayStatuses() {
 		if len(gatewayStatus.Addresses) == 0 {
@@ -115,8 +115,8 @@ func (a *Gateway) GetDNSTargets() ([]kuadrantv1.Target, error) {
 		}
 		// TODO: Allow for more than 1 address
 		ipAddress := gatewayStatus.Addresses[0].Value
-		dnsTarget := kuadrantv1.Target{
-			TargetType: kuadrantv1.TargetTypeIP,
+		dnsTarget := v1alpha1.Target{
+			TargetType: v1alpha1.TargetTypeIP,
 			Value:      ipAddress,
 		}
 		dnsTargets = append(dnsTargets, dnsTarget)

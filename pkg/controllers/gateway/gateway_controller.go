@@ -26,8 +26,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/Kuadrant/multi-cluster-traffic-controller/pkg/_internal/slice"
-	v1 "github.com/Kuadrant/multi-cluster-traffic-controller/pkg/apis/v1"
-	"github.com/Kuadrant/multi-cluster-traffic-controller/pkg/dns"
+	v1alpha1 "github.com/Kuadrant/multi-cluster-traffic-controller/pkg/apis/v1alpha1"
 	"github.com/Kuadrant/multi-cluster-traffic-controller/pkg/syncer"
 	"github.com/Kuadrant/multi-cluster-traffic-controller/pkg/traffic"
 	"github.com/lithammer/shortuuid/v4"
@@ -47,8 +46,8 @@ const (
 )
 
 type HostService interface {
-	RegisterHost(ctx context.Context, h string, id string, zone v1.DNSZone) (*v1.DNSRecord, error)
-	GetManagedZones() []dns.Zone
+	CreateDNSRecord(ctx context.Context, hostKey string, managedZone *v1alpha1.ManagedZone) (*v1alpha1.DNSRecord, error)
+	GetManagedZone(ctx context.Context, t traffic.Interface) (*v1alpha1.ManagedZone, error)
 	AddEndPoints(ctx context.Context, t traffic.Interface) error
 	RemoveEndpoints(ctx context.Context, t traffic.Interface) error
 }
@@ -193,7 +192,6 @@ func (r *GatewayReconciler) reconcileGateway(ctx context.Context, previous gatew
 	}
 
 	// TODO: Move this logic into dns service?
-	zones := r.Host.GetManagedZones()
 	hostKey := shortuuid.NewWithNamespace(trafficAccessor.GetNamespace() + trafficAccessor.GetName())
 	hasAnyAttachedRoutes := false
 	for _, host := range hosts {
@@ -212,22 +210,17 @@ func (r *GatewayReconciler) reconcileGateway(ctx context.Context, previous gatew
 
 		if hasAttachedRoutes {
 			hasAnyAttachedRoutes = true
-			var chosenZone dns.Zone
-			// TODO: Validate hosts against managed zones before creating dns record & certificate.
-			//       Custom hosts with certificates are OK and we'll skip these
-			for _, z := range zones {
-				if z.Default {
-					chosenZone = z
-					break
-				}
+			managedZone, err := r.Host.GetManagedZone(ctx, trafficAccessor)
+			if err != nil {
+				return metav1.ConditionUnknown, clusters, false, err
 			}
-			if chosenZone.ID == "" {
-				log.Info("No zone to use")
-				// ignoring & moving on
+			if managedZone == nil {
+				log.Info("no managed zone available to use")
+				continue
 			}
 			// TODO: ownerRefs e.g.
 			// err = controllerutil.SetControllerReference(parentZone, nsRecord, r.Scheme)
-			record, err := r.Host.RegisterHost(ctx, host, hostKey, chosenZone.DNSZone)
+			record, err := r.Host.CreateDNSRecord(ctx, hostKey, managedZone)
 			if err != nil {
 				log.Error(err, "failed to register host ")
 				return metav1.ConditionUnknown, clusters, false, err
