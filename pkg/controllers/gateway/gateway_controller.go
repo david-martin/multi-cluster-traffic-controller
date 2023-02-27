@@ -91,7 +91,7 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	if previous.GetDeletionTimestamp() != nil && !previous.GetDeletionTimestamp().IsZero() {
 		// TODO: Do we need to remove dns records and/or endpoints?
 		//       Will ownerRefs be sufficient
-		log.Info("Gateway is deleting", "gateway", previous)
+		log.Info("Gateway is deleting", "gateway", previous.Name, "namespace", previous.Namespace)
 		return ctrl.Result{}, nil
 	}
 
@@ -117,7 +117,7 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	// Update gateway spec/metadata
 	if !reflect.DeepEqual(gateway, previous) {
-		log.Info("Updating Gateway", "gateway", gateway.Spec, "previous", previous.Spec)
+		log.Info("Updating Gateway", "gateway", gateway.Name, "namespace", gateway.Namespace)
 		err = r.Update(ctx, gateway)
 		if err != nil {
 			log.Error(err, "Error updating Gateway")
@@ -127,7 +127,7 @@ func (r *GatewayReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 	// Update status
 	gateway.Status.Conditions = buildStatusConditions(gateway.Status, previous.Generation, clusters, acceptedStatus, programmedStatus)
 	if !reflect.DeepEqual(gateway.Status, previous.Status) {
-		log.Info("Updating Gateway status", "gatewayStatus", gateway.Status, "previousStatus", previous.Status)
+		log.Info("Updating Gateway status", "gateway", gateway.Name, "namespace", gateway.Namespace)
 		err = r.Status().Update(ctx, gateway)
 		if err != nil {
 			log.Error(err, "Error updating Gateway status")
@@ -154,7 +154,6 @@ func (r *GatewayReconciler) reconcileGateway(ctx context.Context, previous gatew
 	trafficAccessor := traffic.NewGateway(gateway)
 	hosts := trafficAccessor.GetHosts()
 
-	log.Info("hosts", "hosts", hosts)
 	for _, host := range hosts {
 		// create certificate resource for assigned host
 		if err := r.Certificates.EnsureCertificate(ctx, host, gateway); err != nil && !k8serrors.IsAlreadyExists(err) {

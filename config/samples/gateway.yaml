@@ -8,9 +8,9 @@ spec:
   gatewayClassName: mctc-gw-istio-external-instance-per-cluster
   listeners:
   - name: default
-    port: 80
-    protocol: HTTP
-    hostname: "test.dev.hcpapps.net"
+    port: 443
+    protocol: HTTPS
+    hostname: "myapp.dm.dev.hcpapps.net"
     allowedRoutes:
       namespaces:
         from: All
