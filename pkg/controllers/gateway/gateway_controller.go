@@ -29,7 +29,6 @@ import (
 	v1alpha1 "github.com/Kuadrant/multi-cluster-traffic-controller/pkg/apis/v1alpha1"
 	"github.com/Kuadrant/multi-cluster-traffic-controller/pkg/syncer"
 	"github.com/Kuadrant/multi-cluster-traffic-controller/pkg/traffic"
-	"github.com/lithammer/shortuuid/v4"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -191,7 +190,7 @@ func (r *GatewayReconciler) reconcileGateway(ctx context.Context, previous gatew
 	}
 
 	// TODO: Move this logic into dns service?
-	hostKey := shortuuid.NewWithNamespace(trafficAccessor.GetNamespace() + trafficAccessor.GetName())
+	// hostKey := shortuuid.NewWithNamespace(trafficAccessor.GetNamespace() + trafficAccessor.GetName())
 	hasAnyAttachedRoutes := false
 	for _, host := range hosts {
 		// Only consider host for dns if there's at least 1 attached route to the listener in *any* gateway
@@ -219,7 +218,7 @@ func (r *GatewayReconciler) reconcileGateway(ctx context.Context, previous gatew
 			}
 			// TODO: ownerRefs e.g.
 			// err = controllerutil.SetControllerReference(parentZone, nsRecord, r.Scheme)
-			record, err := r.Host.CreateDNSRecord(ctx, hostKey, managedZone)
+			record, err := r.Host.CreateDNSRecord(ctx, host, managedZone)
 			if err != nil {
 				log.Error(err, "failed to register host ")
 				return metav1.ConditionUnknown, clusters, false, err
