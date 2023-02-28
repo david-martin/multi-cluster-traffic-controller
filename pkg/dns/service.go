@@ -114,7 +114,7 @@ func (s *Service) AddEndPoints(ctx context.Context, traffic traffic.Interface) e
 			endpointFound := false
 			for _, endpoint := range r.Spec.Endpoints {
 				if endpoint.DNSName == host && endpoint.SetIdentifier == addr {
-					log.Log.V(3).Info("address ", addr, "already exists in record for host ", host)
+					log.Log.V(3).Info("address already exists in record for host", "address ", addr, "host", host)
 					endpointFound = true
 					continue
 				}
@@ -303,6 +303,33 @@ func (s *Service) GetManagedZone(ctx context.Context, t traffic.Interface) (*v1a
 	}
 
 	if err := s.controlClient.List(ctx, &managedZones, client.InNamespace(s.defaultCtrlNS)); err != nil {
+		log.Log.Error(err, "unable to list managed zones in default Ctrl NS")
+		return nil, err
+	}
+
+	if len(managedZones.Items) > 0 {
+		return &managedZones.Items[0], nil
+	}
+
+	return nil, fmt.Errorf("no managed zone found for traffic resource : %s", t.GetName())
+}
+
+// GetManagedZoneForDomain returns a ManagedZone for the given domain if one exists.
+// Currently, this returns the first matching ManagedZone found in the traffic resources own namespace, or if none is found,
+// it looks for the first matching one listed in the default ctrl namespace.
+func (s *Service) GetManagedZoneForDomain(ctx context.Context, domain string, t traffic.Interface) (*v1alpha1.ManagedZone, error) {
+	var managedZones v1alpha1.ManagedZoneList
+
+	if err := s.controlClient.List(ctx, &managedZones, client.InNamespace(t.GetNamespace()), client.MatchingFields{"spec.domainName": domain}); err != nil {
+		log.Log.Error(err, "unable to list managed zones in traffic resource NS")
+		return nil, err
+	}
+
+	if len(managedZones.Items) > 0 {
+		return &managedZones.Items[0], nil
+	}
+
+	if err := s.controlClient.List(ctx, &managedZones, client.InNamespace(s.defaultCtrlNS), client.MatchingFields{"spec.domainName": domain}); err != nil {
 		log.Log.Error(err, "unable to list managed zones in default Ctrl NS")
 		return nil, err
 	}
