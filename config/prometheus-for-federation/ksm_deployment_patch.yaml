@@ -4,18 +4,18 @@
 - op: add
   path: /spec/template/spec/volumes
   value:
-      - name: custom_resource_state
+      - name: custom-resource-state
         configMap:
           defaultMode: 420
-          name: custom_resource_state
+          name: custom-resource-state
 - op: add
   path: /spec/template/spec/containers/0/volumeMounts
   value:
-    - name: custom_resource_state
-      mountPath: /custom_resource_state
+    - name: custom-resource-state
+      mountPath: /custom-resource-state
 - op: add
   path: /spec/template/spec/containers/0/args/-
   value: --custom-resource-state-config-file
 - op: add
   path: /spec/template/spec/containers/0/args/-
-  value: /custom_resource_state/custom_resource_state.yaml
+  value: /custom-resource-state/custom-resource-state.yaml
